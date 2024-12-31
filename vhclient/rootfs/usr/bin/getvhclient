@@ -1,0 +1,12 @@
+#!/bin/bash
+
+VHCLIENT_BASE_URL=https://www.virtualhere.com/sites/default/files/usbclient
+case "$BUILD_ARCH" in \
+  armhf) export VHCLIENT="vhclientarmhf";; \
+  aarch64) export VHCLIENT="vhclientarm64";; \
+  amd64) export VHCLIENT="vhclientx86_64";; \
+  i386) export VHCLIENT="vhclienti386";; \
+  *) exit 1;; \
+esac
+curl -sSLf -o /usr/bin/vhclient $VHCLIENT_BASE_URL/$VHCLIENT
+chmod a+x /usr/bin/vhclient

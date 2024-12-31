@@ -1,0 +1,13 @@
+#!/command/with-contenv bashio
+
+mapfile -t devices < <(/usr/bin/vh_list_devices)
+for device in "${devices[@]}"; do
+  options=$(bashio::api.supervisor GET "/addons/self/options/config")
+  options_usbdevices_device=$(echo $options | jq --arg device "$device" '.usbdevices[] | select(.device == ($device))')
+  if [ -z "$options_usbdevices_device" ]; then
+    bashio::log.info "Adding to config: ${device}"
+    options_updated=$(echo $options | jq --arg device "$device" '.usbdevices |= . + [{ device: ($device), use: false }]')
+    options_payload=$(echo $options_updated | jq -r '. = { options: . }')
+    bashio::api.supervisor POST "/addons/self/options" "${options_payload}"
+  fi
+done

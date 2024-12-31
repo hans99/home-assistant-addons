@@ -1,0 +1,14 @@
+#!/command/with-contenv bashio
+
+tmpfile="/tmp/vhclient_config_tmp"
+file="/config/vhclient.ini"
+s6-touch $file
+
+if [ -z "${3:-}" ]; then
+  v=''
+else
+  v=$3
+fi
+
+awk -f /usr/bin/vh_editini.awk -v section=$1 -v key=$2 -v value=$v $file > $tmpfile
+mv $tmpfile $file

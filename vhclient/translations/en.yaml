@@ -1,0 +1,19 @@
+configuration:
+  autouse:
+    name: AUTOUSE
+    description: Turn auto-use all devices on / off
+  autofind:
+    name: AUTOFIND
+    description: Turn auto-find on / off
+  clientid:
+    name: ClientId
+    description: In use by, presentation on the server
+  manualhub:
+    name: MANUAL HUB
+    description: Specify server to connect to
+  usbdevices:
+    name: USB devices
+    description: Auto populated from server list, manually update use to true
+  preventconfig:
+    name: No client config
+    description: Addon should stop editing vhclient config file

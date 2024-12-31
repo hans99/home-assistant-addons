@@ -1,0 +1,34 @@
+#!/usr/bin/with-contenv bashio
+
+preventconfig=$(bashio::cache.get preventconfig)
+if $preventconfig; then
+  bashio::log.info "Prevent USE device from config"
+  exit 0
+fi
+
+autouse=$(bashio::cache.get autouse)
+if $autouse; then
+  bashio::log.info "AutoShare enabled, will not use devices from configuration"
+  exit 0
+fi
+
+if bashio::config.has_value 'usbdevices'; then
+  options=$(bashio::api.supervisor GET "/addons/self/options/config")
+  usbdevices_json=$(echo $options | jq -c '.usbdevices[]')
+  readarray -t usbdevices < <(echo "$usbdevices_json")
+  mapfile -t inuse_devices < <(/usr/bin/vh_list_inuse_devices)
+  for usbdevice in "${usbdevices[@]}"; do
+    use=$(echo $usbdevice | jq '. | if .use then true else false end')
+    device=$(echo $usbdevice | jq '.device | tostring')
+    deviceid=$(echo $device | sed 's/.*(\(.*\)).*/\1/g')
+    if $use; then
+      bashio::log.info "AUTO USE DEVICE,${deviceid}"
+      /usr/bin/vhclient -t "AUTO USE DEVICE,${deviceid}"
+    else
+      if [[ "${inuse_devices[@]}" =~ "$device" ]]; then
+        bashio::log.info "STOP USING,${deviceid}"
+        /usr/bin/vhclient -t "STOP USING,${deviceid}"
+      fi
+    fi
+  done
+fi

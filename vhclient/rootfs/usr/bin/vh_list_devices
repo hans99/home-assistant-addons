@@ -1,0 +1,3 @@
+#!/command/with-contenv bashio
+
+/usr/bin/vhclient -t list | awk '{ if ($1 ~ /-->/) { print substr($0, 8, index($0, ")") - 7 ) } }'

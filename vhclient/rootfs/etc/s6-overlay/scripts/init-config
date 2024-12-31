@@ -1,0 +1,48 @@
+#!/command/with-contenv bashio
+
+options=$(bashio::api.supervisor GET "/addons/self/options/config")
+preventconfig=$(echo $options | jq '. | if .preventconfig then true else false end')
+autofind=$(echo $options | jq '. | if .autofind then true else false end')
+autouse=$(echo $options | jq '. | if .autouse then true else false end')
+clientid=$(echo $options | jq '.clientid | select(. != null)')
+manualhub=$(echo $options | jq '.manualhub | select(. != null)')
+
+bashio::cache.set preventconfig $preventconfig
+bashio::cache.set autouse $autouse
+
+if $preventconfig; then
+  bashio::log.info "Prevent updating config"
+  exit 0
+fi
+
+if $autofind; then
+  bashio::log.info "Enable General AutoFind"
+  /usr/bin/vh_editini General AutoFind 1
+else
+  bashio::log.info "Disable General AutoFind"
+  /usr/bin/vh_editini General AutoFind 0
+fi
+
+if $autouse; then
+  bashio::log.info "Enable AutoShare All"
+  /usr/bin/vh_editini AutoShare All 1
+else
+  bashio::log.info "Disable AutoShare"
+  /usr/bin/vh_editini AutoShare All 0
+fi
+
+if [ -n "$clientid" ]; then
+  bashio::log.info "Set General ClientId to ${clientid}"
+  /usr/bin/vh_editini General ClientId ${clientid}
+else
+  bashio::log.info "Remove General ClientId"
+  /usr/bin/vh_editini General ClientId
+fi
+
+if [ -n "$manualhub" ]; then
+  bashio::log.info "Set Settings ManualHubs to ${manualhub}"
+  /usr/bin/vh_editini Settings ManualHubs ${manualhub}
+else
+  bashio::log.info "Remove Settings ManualHubs"
+  /usr/bin/vh_editini Settings ManualHubs
+fi

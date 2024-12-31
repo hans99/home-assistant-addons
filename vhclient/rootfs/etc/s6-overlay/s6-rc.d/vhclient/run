@@ -1,0 +1,4 @@
+#!/usr/bin/with-contenv bashio
+
+bashio::log.info "Starting VirtualHere Client"
+exec /usr/bin/vhclient -c /config/vhclient.ini -l /dev/stdout
