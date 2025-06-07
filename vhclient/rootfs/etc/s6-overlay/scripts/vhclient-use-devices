@@ -8,7 +8,7 @@ fi
 
 autouse=$(bashio::cache.get autouse)
 if $autouse; then
-  bashio::log.info "AutoShare enabled, will not use devices from configuration"
+  bashio::log.info "AutoShare All enabled, will not use devices from configuration"
   exit 0
 fi
 
@@ -17,17 +17,22 @@ if bashio::config.has_value 'usbdevices'; then
   usbdevices_json=$(echo $options | jq -c '.usbdevices[]')
   readarray -t usbdevices < <(echo "$usbdevices_json")
   mapfile -t inuse_devices < <(/usr/bin/vh_list_inuse_devices)
+  for inuse_device in "${!inuse_devices[@]}"; do
+    bashio::log.info "Device in use - ${inuse_devices[${inuse_device}]}"
+  done
   for usbdevice in "${usbdevices[@]}"; do
     use=$(echo $usbdevice | jq '. | if .use then true else false end')
     device=$(echo $usbdevice | jq '.device | tostring')
     deviceid=$(echo $device | sed 's/.*(\(.*\)).*/\1/g')
-    if $use; then
-      bashio::log.info "AUTO USE DEVICE,${deviceid}"
-      /usr/bin/vhclient -t "AUTO USE DEVICE,${deviceid}"
+    if [[ ${inuse_devices[@]} =~ .*${deviceid}.* ]]; then
+      if ! $use; then
+        result=$(/usr/bin/vhclient -t "STOP USING,${deviceid}")
+        bashio::log.info "STOP USING,${deviceid} - ${result}"
+      fi
     else
-      if [[ "${inuse_devices[@]}" =~ "$device" ]]; then
-        bashio::log.info "STOP USING,${deviceid}"
-        /usr/bin/vhclient -t "STOP USING,${deviceid}"
+      if $use; then
+        result=$(/usr/bin/vhclient -t "AUTO USE DEVICE,${deviceid}")
+        bashio::log.info "AUTO USE DEVICE,${deviceid} - ${result}"
       fi
     fi
   done
