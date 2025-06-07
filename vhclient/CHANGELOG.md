@@ -1,3 +1,7 @@
+## 0.3.1
+
+- Increased start delay for client to connect to server.
+
 ## 0.3.0
 
 - Update handling of setting device to used and not used.

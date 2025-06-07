@@ -1,6 +1,6 @@
 #!/usr/bin/with-contenv bashio
 
 bashio::log.info "Waiting a bit for vhclient ..."
-s6-sleep 5
+s6-sleep 15  # TODO: make it check not just wait
 server_connection=$(/usr/bin/vhclient -t "GET CLIENT STATE" | awk '/<connection/{print}')
 bashio::log.info "Server: ${server_connection}"
