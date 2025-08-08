@@ -8,5 +8,6 @@ case "$BUILD_ARCH" in \
   i386) export VHCLIENT="vhclienti386";; \
   *) exit 1;; \
 esac
+echo "Downloading latest version of client:" $VHCLIENT_BASE_URL/$VHCLIENT
 curl -sSLf -o /usr/bin/vhclient $VHCLIENT_BASE_URL/$VHCLIENT
 chmod a+x /usr/bin/vhclient

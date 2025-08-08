@@ -1,3 +1,7 @@
+## 0.3.2
+
+- Make sure latest version of vhclient is downloaded.
+
 ## 0.3.1
 
 - Increased start delay for client to connect to server.
