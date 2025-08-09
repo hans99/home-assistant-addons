@@ -1,3 +1,7 @@
+## 0.3.3
+
+- Fix bug in vhclient download script.
+
 ## 0.3.2
 
 - Make sure latest version of vhclient is downloaded.

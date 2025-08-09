@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bashio
 
 VHCLIENT_BASE_URL=https://www.virtualhere.com/sites/default/files/usbclient
 case "$BUILD_ARCH" in \
