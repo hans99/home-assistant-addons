@@ -1,3 +1,7 @@
+## 0.3.4
+
+- Update docker build.
+
 ## 0.3.3
 
 - Fix bug in vhclient download script.
