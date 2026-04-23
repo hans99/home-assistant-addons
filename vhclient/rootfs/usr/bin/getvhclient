@@ -9,5 +9,6 @@ case "$BUILD_ARCH" in \
   *) exit 1;; \
 esac
 echo "Downloading latest version of client:" $VHCLIENT_BASE_URL/$VHCLIENT
-curl -sSLf -o /usr/bin/vhclient $VHCLIENT_BASE_URL/$VHCLIENT
+curl -sSLf -o /usr/bin/vhclient_tmp $VHCLIENT_BASE_URL/$VHCLIENT
+mv /usr/bin/vhclient_tmp /usr/bin/vhclient
 chmod a+x /usr/bin/vhclient

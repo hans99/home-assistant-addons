@@ -1,3 +1,7 @@
+## 0.3.5
+
+- Fix updating vhclient version during rebuild.
+
 ## 0.3.4
 
 - Update docker build.
