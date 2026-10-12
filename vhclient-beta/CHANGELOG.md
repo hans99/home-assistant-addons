@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.5
+
+- Connect to the MQTT broker from the Supervisor service (`host`, `username`, `password`) and subscribe there for switch commands
+- Republish discovery when the broker connects and when Home Assistant publishes its MQTT birth message
+
 ## 0.7.4
 
 - Publish the full MQTT switch discovery payload (command topic, state topic, on/off payloads, qos) and subscribe only to those command topics

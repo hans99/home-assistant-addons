@@ -76,16 +76,14 @@ def mqtt_publish(
     retain: bool = False,
     qos: int = 0,
 ) -> None:
-    call_service(
-        "mqtt",
-        "publish",
-        {
-            "topic": topic,
-            "payload": payload,
-            "retain": retain,
-            "qos": qos,
-        },
-    )
+    """Publish on the MQTT broker from the Supervisor services API.
+
+    Discovery, state, and availability go to the same broker Home Assistant
+    uses, which is where switch command topics are delivered.
+    """
+    from . import mqtt as mqtt_client
+
+    mqtt_client.broker.publish(topic, payload, retain=retain, qos=qos)
 
 
 class HaWebsocket:
@@ -259,29 +257,6 @@ class _WsConn:
             pass
 
 
-def _message_id(message: dict[str, Any]) -> Optional[int]:
-    raw = message.get("id")
-    try:
-        return int(raw)
-    except (TypeError, ValueError):
-        return None
-
-
-def _dispatch_mqtt_event(
-    message: dict[str, Any],
-    subscribed: dict[int, str],
-    on_message: Callable[[str, str], None],
-) -> None:
-    msg_id = _message_id(message)
-    if message.get("type") != "event" or msg_id not in subscribed:
-        return
-    event = message.get("event") or {}
-    evt_topic = event.get("topic")
-    payload = event.get("payload")
-    if isinstance(evt_topic, str) and payload is not None:
-        on_message(evt_topic, str(payload))
-
-
 def run_mqtt_subscriber(
     topics: Callable[[], Set[str]],
     on_message: Callable[[str, str], None],
@@ -290,92 +265,23 @@ def run_mqtt_subscriber(
     max_failures: int = 0,
     on_failure: Optional[Callable[[Exception, int], None]] = None,
     on_give_up: Optional[Callable[[Exception], None]] = None,
+    *,
+    availability_topic: str = "vhclient/status",
+    birth_topic: str = "homeassistant/status",
+    on_ready: Optional[Callable[[], None]] = None,
 ) -> None:
-    """Block, subscribing to command topics until should_stop().
+    """Block, subscribed to the broker from the Supervisor MQTT service."""
+    from . import mqtt as mqtt_client
 
-    ``topics`` is read again while connected so new USB device switches are
-    subscribed without waiting for a reconnect. Pass the exact ``command_topic``
-    strings from MQTT discovery. Home Assistant delivers those on the simple
-    subscription path; overlapping wildcards can drop the same click.
-
-    If max_failures > 0, stop after that many consecutive connect/subscribe
-    failures (successful subscribe resets the counter).
-    """
-    import time
-
-    failures = 0
-    while not should_stop():
-        try:
-            with HaWebsocket(timeout=60.0) as ws:
-                subscribed: dict[int, str] = {}
-                pending: dict[int, str] = {}
-
-                def ensure_topics() -> None:
-                    wanted = {topic for topic in topics() if topic}
-                    have = set(subscribed.values()) | set(pending.values())
-                    for topic in sorted(wanted - have):
-                        sub_id = ws.send(
-                            {"type": "mqtt/subscribe", "topic": topic, "qos": 0}
-                        )
-                        pending[sub_id] = topic
-
-                def take_result(message: dict[str, Any]) -> bool:
-                    msg_id = _message_id(message)
-                    if message.get("type") != "result" or msg_id not in pending:
-                        return False
-                    topic = pending.pop(msg_id)
-                    if not message.get("success"):
-                        raise RuntimeError(f"mqtt/subscribe failed for {topic}: {message}")
-                    subscribed[msg_id] = topic
-                    log.info("Subscribed to MQTT topic %s via Home Assistant", topic)
-                    return True
-
-                ensure_topics()
-                while pending and not should_stop():
-                    try:
-                        incoming = ws.recv(timeout=30.0)
-                    except socket.timeout:
-                        ensure_topics()
-                        continue
-                    if take_result(incoming):
-                        continue
-                    _dispatch_mqtt_event(incoming, subscribed, on_message)
-                failures = 0
-                if subscribed:
-                    log.info(
-                        "Listening for switch commands on %s",
-                        ", ".join(sorted(subscribed.values())),
-                    )
-
-                while not should_stop():
-                    ensure_topics()
-                    try:
-                        incoming = ws.recv(timeout=2.0)
-                    except socket.timeout:
-                        continue
-                    if take_result(incoming):
-                        continue
-                    _dispatch_mqtt_event(incoming, subscribed, on_message)
-        except Exception as exc:  # noqa: BLE001
-            if should_stop():
-                break
-            failures += 1
-            if on_failure is not None:
-                on_failure(exc, failures)
-            else:
-                log.warning(
-                    "MQTT subscribe disconnected (%s); retry %s%s",
-                    exc,
-                    failures,
-                    f"/{max_failures}" if max_failures > 0 else "",
-                )
-            if max_failures > 0 and failures >= max_failures:
-                if on_give_up is not None:
-                    on_give_up(exc)
-                else:
-                    log.error(
-                        "MQTT subscribe failed %s times; giving up",
-                        failures,
-                    )
-                break
-            time.sleep(reconnect_seconds)
+    mqtt_client.broker.run(
+        topics,
+        on_message,
+        should_stop,
+        availability_topic=availability_topic,
+        birth_topic=birth_topic,
+        on_ready=on_ready,
+        reconnect_seconds=reconnect_seconds,
+        max_failures=max_failures,
+        on_failure=on_failure,
+        on_give_up=on_give_up,
+    )

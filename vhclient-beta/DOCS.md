@@ -26,7 +26,7 @@ Supervisor can monitor app health when **Watchdog** is enabled for the app. This
 
 This app enables `hassio_api` (role `default`) for Supervisor options updates, and `homeassistant_api` for Home Assistant Core. After a VirtualHere device is attached or detached (`USE` / `STOP USING`, or Auto-Use All bind), it asks Core to run `usb/scan` so integrations can pick up the new USB hardware.
 
-Optional MQTT (`services: mqtt:want`) is used only when **Home Assistant entities** is enabled, via Core `mqtt.publish` / `mqtt/subscribe`.
+Optional MQTT (`services: mqtt:want`) is used only when **Home Assistant entities** is enabled. The app reads the broker from the Supervisor MQTT service and publishes discovery, state, and availability on that broker. Switch clicks arrive on the `command_topic` from each discovery message. Discovery is published again when the broker connects and when Home Assistant sends its MQTT birth message (`homeassistant/status` = `online`).
 
 ## Configuration
 
