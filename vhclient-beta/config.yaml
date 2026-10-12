@@ -1,5 +1,5 @@
 name: VirtualHere Client (Beta)
-version: "0.7.3"
+version: "0.7.4"
 slug: vhclient-beta
 description: Beta VirtualHere USB Client for Home Assistant (API control, MQTT entities)
 arch:

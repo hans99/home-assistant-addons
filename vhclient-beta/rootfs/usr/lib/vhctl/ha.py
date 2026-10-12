@@ -294,9 +294,9 @@ def run_mqtt_subscriber(
     """Block, subscribing to command topics until should_stop().
 
     ``topics`` is read again while connected so new USB device switches are
-    subscribed without waiting for a reconnect. Exact topics are required:
-    Home Assistant delivers those on the simple MQTT subscription path, while
-    a single wildcard can miss switch commands.
+    subscribed without waiting for a reconnect. Pass the exact ``command_topic``
+    strings from MQTT discovery. Home Assistant delivers those on the simple
+    subscription path; overlapping wildcards can drop the same click.
 
     If max_failures > 0, stop after that many consecutive connect/subscribe
     failures (successful subscribe resets the counter).

@@ -93,6 +93,79 @@ def discovery_topic(platform: str, unique_id: str) -> str:
     return f"{DISCOVERY_PREFIX}/{platform}/{unique_id}/config"
 
 
+def subscribe_topic(payload: Dict[str, Any], field: str = "command_topic") -> Optional[str]:
+    """Return the topic Home Assistant will use from a discovery payload.
+
+    A leading ``~`` is the discovery base-topic prefix and is expanded before
+    subscribing. The value stored here is the exact topic to subscribe to.
+    """
+    raw = payload.get(field)
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    topic = raw.strip()
+    base = payload.get("~")
+    if topic.startswith("~") and isinstance(base, str) and base.strip():
+        topic = base.strip().rstrip("/") + topic[1:]
+    return topic
+
+
+def _origin(sw_version: str) -> dict[str, str]:
+    origin = {
+        "name": "VirtualHere Client",
+        "support_url": (
+            "https://git.carlscrona.se/haka/home-assistant-addons/src/branch/main/vhclient-beta"
+        ),
+    }
+    if sw_version:
+        origin["sw"] = sw_version
+    return origin
+
+
+def switch_discovery_payload(
+    *,
+    name: str,
+    unique_id: str,
+    command_topic: str,
+    state_topic: str,
+    icon: str,
+    sw_version: str,
+    availability: list[dict[str, str]] | None = None,
+    availability_topic: str | None = None,
+) -> dict[str, Any]:
+    """Full MQTT switch discovery document.
+
+    ``command_topic`` is both where Home Assistant publishes a click and where
+    this addon subscribes. ``state_on`` / ``state_off`` match the retained
+    state payloads this addon publishes.
+    """
+    payload: dict[str, Any] = {
+        "name": name,
+        "unique_id": unique_id,
+        "object_id": unique_id,
+        "command_topic": command_topic,
+        "state_topic": state_topic,
+        "payload_on": "ON",
+        "payload_off": "OFF",
+        "state_on": "ON",
+        "state_off": "OFF",
+        "qos": 0,
+        "retain": False,
+        "encoding": "utf-8",
+        "optimistic": False,
+        "icon": icon,
+        "device": _device_block(sw_version),
+        "origin": _origin(sw_version),
+    }
+    if availability is not None:
+        payload["availability_mode"] = "all"
+        payload["availability"] = availability
+    elif availability_topic:
+        payload["availability_topic"] = availability_topic
+        payload["payload_available"] = "online"
+        payload["payload_not_available"] = "offline"
+    return payload
+
+
 def entity_key(platform: str, key: str) -> str:
     return f"{platform}:{key}"
 
@@ -367,6 +440,9 @@ class HaEntityManager:
             for key in self._published
             if key.startswith("switch:") and not key.startswith("switch:client_")
         }
+        # command_topic strings taken from the discovery payloads we publish.
+        self._command_topics_by_key: Dict[str, str] = {}
+        self._discovery_logged: Dict[str, str] = {}
 
     def start(self) -> None:
         if self._gave_up:
@@ -530,6 +606,8 @@ class HaEntityManager:
         self._stop.set()
         self._published.clear()
         self._addresses.clear()
+        self._command_topics_by_key.clear()
+        self._discovery_logged.clear()
         _save_published(self._published)
         _disable_ha_entities_option()
 
@@ -541,30 +619,40 @@ class HaEntityManager:
         payload: dict[str, Any],
     ) -> bool:
         def publish() -> None:
-            ha.mqtt_publish(
-                discovery_topic(platform, unique_id),
-                json.dumps(payload, separators=(",", ":")),
-                retain=True,
-            )
-            self._published.add(entity_key(platform, key))
+            topic = discovery_topic(platform, unique_id)
+            body = json.dumps(payload, separators=(",", ":"))
+            ha.mqtt_publish(topic, body, retain=True)
+            published_key = entity_key(platform, key)
+            self._published.add(published_key)
+            command = subscribe_topic(payload, "command_topic")
+            if command:
+                self._command_topics_by_key[published_key] = command
+            else:
+                self._command_topics_by_key.pop(published_key, None)
+            if self._discovery_logged.get(published_key) != body:
+                self._discovery_logged[published_key] = body
+                if command:
+                    log.info(
+                        "MQTT discovery %s command_topic=%s state_topic=%s",
+                        topic,
+                        command,
+                        subscribe_topic(payload, "state_topic"),
+                    )
+                log.info("MQTT discovery payload %s %s", topic, body)
 
         return self._mqtt_call(publish)
 
     def _publish_switch_locked(self, address: str, name: str, sw_version: str) -> bool:
         # Addon online AND device not held by another client.
-        payload = {
-            "name": name,
-            "unique_id": switch_unique_id(address),
-            "command_topic": switch_command_topic(address),
-            "state_topic": switch_state_topic(address),
-            "payload_on": "ON",
-            "payload_off": "OFF",
-            "optimistic": False,
-            "icon": "mdi:usb-port",
-            "device": _device_block(sw_version),
-            "object_id": switch_unique_id(address),
-            "availability_mode": "all",
-            "availability": [
+        unique_id = switch_unique_id(address)
+        payload = switch_discovery_payload(
+            name=name,
+            unique_id=unique_id,
+            command_topic=switch_command_topic(address),
+            state_topic=switch_state_topic(address),
+            icon="mdi:usb-port",
+            sw_version=sw_version,
+            availability=[
                 {
                     "topic": AVAILABILITY_TOPIC,
                     "payload_available": "online",
@@ -576,8 +664,8 @@ class HaEntityManager:
                     "payload_not_available": "offline",
                 },
             ],
-        }
-        return self._publish_discovery("switch", address, switch_unique_id(address), payload)
+        )
+        return self._publish_discovery("switch", address, unique_id, payload)
 
     def _publish_switch_state_locked(self, address: str, state: str) -> bool:
         return self._mqtt_call(
@@ -635,19 +723,15 @@ class HaEntityManager:
         }
         for key, name, icon, _option in CLIENT_SWITCHES:
             unique_id = client_entity_unique_id(key)
-            payload = {
-                "name": name,
-                "unique_id": unique_id,
-                "command_topic": client_command_topic(key),
-                "state_topic": client_state_topic(key),
-                "payload_on": "ON",
-                "payload_off": "OFF",
-                "optimistic": False,
-                "icon": icon,
-                "device": _device_block(sw_version),
-                "object_id": unique_id,
-                **_availability(),
-            }
+            payload = switch_discovery_payload(
+                name=name,
+                unique_id=unique_id,
+                command_topic=client_command_topic(key),
+                state_topic=client_state_topic(key),
+                icon=icon,
+                sw_version=sw_version,
+                availability_topic=AVAILABILITY_TOPIC,
+            )
             if not self._publish_discovery("switch", f"client_{key}", unique_id, payload):
                 return False
             state = "ON" if states.get(key) else "OFF"
@@ -694,6 +778,8 @@ class HaEntityManager:
             lambda: ha.mqtt_publish(discovery_topic(platform, unique_id), "", retain=True)
         )
         self._published.discard(key)
+        self._command_topics_by_key.pop(key, None)
+        self._discovery_logged.pop(key, None)
         if platform == "switch" and not entity.startswith("client_"):
             self._addresses.discard(entity)
         return ok
@@ -719,6 +805,8 @@ class HaEntityManager:
         except Exception as exc:  # noqa: BLE001
             log.debug("Availability offline publish failed during clear: %s", exc)
         self._addresses.clear()
+        self._command_topics_by_key.clear()
+        self._discovery_logged.clear()
         _save_published(self._published)
 
     def _address_for_slug(self, slug: str) -> Optional[str]:
@@ -811,22 +899,14 @@ class HaEntityManager:
             )
 
     def command_topics(self) -> Set[str]:
-        """Exact command topics, plus one wildcard per switch group.
+        """Exact ``command_topic`` values from the discovery payloads last published.
 
-        Exact topics are what Home Assistant reliably delivers. The wildcards
-        cover a device switch that is toggled before its exact subscribe exists.
+        Wildcards are omitted. Home Assistant assigns those a separate MQTT
+        subscription id, and a click that also matches an exact topic can be
+        dropped instead of delivered.
         """
         with self._lock:
-            addresses = {
-                addr
-                for addr in self._addresses
-                if addr and not str(addr).startswith("client_")
-            }
-        topics = {client_command_topic(key) for key, _, _, _ in CLIENT_SWITCHES}
-        topics.update(switch_command_topic(addr) for addr in addresses)
-        topics.add("vhclient/usb/+/set")
-        topics.add("vhclient/client/+/set")
-        return topics
+            return {topic for topic in self._command_topics_by_key.values() if topic}
 
     def _listen_commands(self) -> None:
         recent: Dict[tuple[str, str], float] = {}

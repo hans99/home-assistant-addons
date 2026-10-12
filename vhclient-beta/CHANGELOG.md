@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.4
+
+- Publish the full MQTT switch discovery payload (command topic, state topic, on/off payloads, qos) and subscribe only to those command topics
+
 ## 0.7.3
 
 - Subscribe to each device and control switch command topic, not only one wildcard
