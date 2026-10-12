@@ -1,0 +1,2 @@
+#!/command/with-contenv bashio
+exec /etc/s6-overlay/scripts/vhctl-watch

@@ -1,0 +1,4 @@
+#!/command/with-contenv bashio
+
+/sbin/modprobe -s vhci-hcd
+mount -o remount -t sysfs sysfs /sys

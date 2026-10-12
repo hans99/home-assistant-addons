@@ -1,0 +1,24 @@
+configuration:
+  autouse:
+    name: Auto-use all devices
+    description: Applied via Client API (AUTO USE ALL / AUTO USE CLEAR ALL)
+  autofind:
+    name: Auto-find
+    description: Applied via Client API (AUTOFIND toggle)
+  manualhub:
+    name: Manual hub
+    description: Connect to this hub via Client API (host:port)
+  usbdevices:
+    name: USB devices
+    description: Auto-refreshed list (nickname + in-use). Changing use disables Auto-use all and applies live via vhctl watch
+  preventconfig:
+    name: No client config
+    description: Do not apply autofind/autouse/manualhub or per-device USE via the Client API
+  discover_interval:
+    name: USB list refresh interval
+    description: Seconds between automatic USB device list refreshes (5–3600, default 30)
+  ha_entities:
+    name: Home Assistant entities
+    description: Create a VirtualHere Client device with use switches and info sensors per USB device (requires MQTT integration)
+network:
+  8199/TCP: Health check endpoint for Supervisor watchdog

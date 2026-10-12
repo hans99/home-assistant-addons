@@ -1,0 +1,6 @@
+#!/command/with-contenv bashio
+
+# Global client settings are applied via VirtualHere Client API after IPC is up
+# (see config-client / vhctl configure). Never write vhclient.ini from this app.
+bashio::log.info "init-config: no local ini edits (API-only control)"
+exit 0

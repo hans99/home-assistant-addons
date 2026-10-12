@@ -1,0 +1,48 @@
+name: VirtualHere Client (Beta)
+version: "0.7.0"
+slug: vhclient-beta
+description: Beta VirtualHere USB Client for Home Assistant (API control, MQTT entities)
+arch:
+  - aarch64
+  - amd64
+url: "https://git.carlscrona.se/haka/home-assistant-addons/src/branch/main/vhclient-beta"
+startup: services
+host_network: true
+hassio_api: true
+hassio_role: default
+homeassistant_api: true
+# Optional: HA entity switches/sensors publish via Core mqtt.publish when enabled.
+services:
+  - mqtt:want
+privileged:
+  - SYS_ADMIN
+map:
+  - type: homeassistant_config
+    read_only: false
+    path: /config
+usb: true
+kernel_modules: true
+ports:
+  8199/tcp: 8199
+ports_description:
+  8199/tcp: Health check for Supervisor watchdog
+watchdog: "http://[HOST]:[PORT:8199]/health"
+options:
+  autouse: true
+  autofind: true
+  usbdevices: []
+  preventconfig: false
+  discover_interval: 30
+  ha_entities: false
+schema:
+  autouse: bool
+  autofind: bool
+  usbdevices:
+    - device: str?
+      use: bool?
+  preventconfig: bool
+  manualhub: str?
+  discover_interval: int(5,3600)
+  ha_entities: bool
+stage: experimental
+init: false

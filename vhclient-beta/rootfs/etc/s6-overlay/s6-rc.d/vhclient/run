@@ -1,0 +1,8 @@
+#!/command/with-contenv bashio
+
+# Run the console client in the foreground under s6 (do not use -n/--daemon here).
+# Absolute -c path lets VirtualHere persist its own state; this app never writes that file.
+# Control the running process via named pipes /tmp/vhclient (+ _response) or vhctl.
+# Docs: https://www.virtualhere.com/linux_console
+bashio::log.info "Starting VirtualHere Client"
+exec /usr/bin/vhclient -c /config/vhclient.ini -l /dev/stdout

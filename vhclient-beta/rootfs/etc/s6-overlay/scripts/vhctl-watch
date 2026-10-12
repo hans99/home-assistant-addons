@@ -1,0 +1,6 @@
+#!/command/with-contenv bashio
+
+# Long-running controller: apply config/USB use changes without requiring a
+# manual app restart, and periodically refresh the USB devices list.
+# discover_interval is read from addon options (default 30s); CLI value is fallback only.
+exec /usr/bin/vhctl watch --poll 2 --discover-interval 30

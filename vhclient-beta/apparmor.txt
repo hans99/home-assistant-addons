@@ -1,0 +1,98 @@
+#include <tunables/global>
+
+# Custom profile for VirtualHere console client (keeps AppArmor enabled).
+# Uses `file,` like official HA add-on profiles so s6-overlay `/init` and
+# shell scripts can run; network is restricted (no global `network,`).
+# If the app fails to start, check:
+#   journalctl _TRANSPORT="audit" -g 'apparmor="DENIED"'
+# Temporarily add flag complain to gather ALLOWED events, then tighten.
+
+profile vhclient flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+
+  # Capabilities required for vhci-hcd, USB/IP, and s6
+  capability chown,
+  capability dac_override,
+  capability fowner,
+  capability fsetid,
+  capability kill,
+  capability net_admin,
+  capability net_bind_service,
+  capability net_raw,
+  capability setgid,
+  capability setuid,
+  capability sys_admin,
+  capability sys_module,
+
+  # Broad file access (required for s6 /init + bashio; path-only lists break startup)
+  file,
+
+  # Mounts: remount sysfs for vhci; load kernel modules
+  mount,
+  remount,
+  umount,
+
+  # Outbound hub TCP + health listen + DNS (no unrestricted `network,`)
+  network inet stream,
+  network inet6 stream,
+  network inet dgram,
+  network inet6 dgram,
+  network netlink raw,
+
+  signal (send) set=(kill,term,int,hup,cont),
+  signal (receive) set=(kill,term,int,hup,cont),
+
+  # S6-Overlay / container init
+  /init ix,
+  /bin/** ix,
+  /sbin/** ix,
+  /usr/bin/** ix,
+  /usr/sbin/** ix,
+  /run/{s6,s6-rc*,service}/** ix,
+  /package/** ix,
+  /command/** ix,
+  /etc/s6-overlay/** rwix,
+  /run/{,**} rwk,
+  /dev/tty rw,
+
+  # Bashio / Python vhctl
+  /usr/lib/bashio/** ix,
+  /usr/lib/vhctl/** r,
+  /usr/bin/python3* ix,
+  /usr/lib/python3*/** mr,
+  /usr/lib/** mr,
+  /lib/** mr,
+  /lib64/** mr,
+  /tmp/** rwk,
+
+  # Persistent data + mapped Home Assistant config (vhclient.ini)
+  /data/** rw,
+  /config/** rw,
+
+  # Kernel modules + sysfs (vhci-hcd / usbip)
+  /lib/modules/** r,
+  /etc/modules.conf r,
+  /etc/modprobe.d/** r,
+  /sys/** rwk,
+  /proc/** r,
+
+  # USB / usbip / console logging
+  /dev/null rw,
+  /dev/zero r,
+  /dev/full rw,
+  /dev/random r,
+  /dev/urandom r,
+  /dev/stdin r,
+  /dev/stdout rw,
+  /dev/stderr rw,
+  /dev/bus/usb/ r,
+  /dev/bus/usb/** rw,
+  /dev/vhci* rw,
+  /dev/usbip* rw,
+
+  # VirtualHere client binary + IPC named pipes + vhctl
+  /usr/bin/vhclient rix,
+  /usr/bin/vhctl rix,
+  /tmp/vhclient rw,
+  /tmp/vhclient_response rw,
+}

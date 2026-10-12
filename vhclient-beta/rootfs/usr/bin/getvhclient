@@ -1,0 +1,23 @@
+#!/bin/bash
+# Download VirtualHere Linux console client for BUILD_ARCH.
+# Supported: aarch64, amd64 (matches config.yaml / current Supervisor).
+# https://www.virtualhere.com/usb_client_software
+
+set -euo pipefail
+
+BUILD_ARCH="${1:-${BUILD_ARCH:-}}"
+VHCLIENT_BASE_URL=https://www.virtualhere.com/sites/default/files/usbclient
+
+case "${BUILD_ARCH}" in
+  aarch64) VHCLIENT="vhclientarm64" ;;
+  amd64) VHCLIENT="vhclientx86_64" ;;
+  *)
+    echo "Unsupported BUILD_ARCH: ${BUILD_ARCH} (supported: aarch64, amd64)" >&2
+    exit 1
+    ;;
+esac
+
+echo "Downloading latest VirtualHere console client: ${VHCLIENT_BASE_URL}/${VHCLIENT}"
+curl -sSLf -o /usr/bin/vhclient_tmp "${VHCLIENT_BASE_URL}/${VHCLIENT}"
+mv /usr/bin/vhclient_tmp /usr/bin/vhclient
+chmod a+x /usr/bin/vhclient

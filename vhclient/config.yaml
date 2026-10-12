@@ -7,7 +7,7 @@ arch:
   - aarch64
   - amd64
   - i386
-url: "https://github.com/hans99/home-assistant-addons"
+url: "https://github.com/hans99/home-assistant-addons/src/branch/main/vhclient"
 startup: services
 host_network: true
 hassio_api: true
