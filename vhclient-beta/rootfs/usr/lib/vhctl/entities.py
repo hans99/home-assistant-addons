@@ -18,7 +18,7 @@ import re
 import threading
 from typing import Any, Callable, Dict, Optional, Set, Tuple
 
-from . import api, config, ha
+from . import api, config, ha, sync
 
 log = logging.getLogger("vhctl")
 
@@ -202,13 +202,16 @@ def _set_device_use(address: str, use: bool) -> None:
         elif changed:
             log.info("HA switch set %s use=%s", address, use)
 
+        # A switch click always leaves Auto-Use All, even when the stored use
+        # flag already matches (the switch can be on because the device is in use).
+        if bool(options.get("autouse", True)):
+            options["autouse"] = False
+            changed = True
+            log.info("Disabled Auto-Use All after HA USB switch change")
+
         if not changed:
             return False
         options["usbdevices"] = updated
-        # Manual use/not-use takes over from Auto-Use All.
-        if bool(options.get("autouse", True)):
-            options["autouse"] = False
-            log.info("Disabled Auto-Use All after HA USB switch change")
         return True
 
     try:
@@ -291,7 +294,7 @@ def _collect_device_info(
         vendor_id = info.vendor_id or vendor_id
         product_id = info.product_id or product_id
         serial = info.serial or serial
-        in_use_by = api.normalize_in_use_by(info.in_use_by)
+        in_use_by = api.effective_in_use_by(info.in_use_by)
 
     if state_dev is not None:
         nickname = nickname or state_dev.nickname
@@ -717,21 +720,38 @@ class HaEntityManager:
         self._addresses.clear()
         _save_published(self._published)
 
-    def _handle_usb_command(self, slug: str, payload: str) -> None:
-        address = None
+    def _address_for_slug(self, slug: str) -> Optional[str]:
+        wanted = slug.lower()
         with self._lock:
-            for candidate in self._addresses:
-                if _slug(candidate) == slug:
-                    address = candidate
-                    break
+            candidates = list(self._addresses)
+        for candidate in candidates:
+            if _slug(candidate).lower() == wanted:
+                return candidate
+        try:
+            options = config.read_options()
+        except Exception:  # noqa: BLE001
+            options = {}
+        for item in options.get("usbdevices") or []:
+            if not isinstance(item, dict):
+                continue
+            address = api.extract_address(str(item.get("device") or ""))
+            if address and _slug(address).lower() == wanted:
+                return address
+        return None
+
+    def _handle_usb_command(self, slug: str, payload: str) -> None:
+        address = self._address_for_slug(slug)
         if address is None:
             log.warning("Ignoring HA switch command for unknown device slug %s", slug)
             return
+        want = payload.strip().upper() in ("ON", "TRUE", "1")
+        log.info("HA switch %s -> %s", address, "ON" if want else "OFF")
+
         in_use_by = "NO ONE"
         try:
             info = api.device_info(address)
             if info is not None:
-                in_use_by = api.normalize_in_use_by(info.in_use_by)
+                in_use_by = api.effective_in_use_by(info.in_use_by)
         except Exception:  # noqa: BLE001
             pass
         if not _is_controllable(in_use_by):
@@ -745,11 +765,26 @@ class HaEntityManager:
                 self._publish_switch_state_locked(address, "ON")
             return
 
-        want = payload.strip().upper() in ("ON", "TRUE", "1")
         _set_device_use(address, want)
+        prevent = False
+        try:
+            prevent = bool(config.read_options().get("preventconfig"))
+        except Exception:  # noqa: BLE001
+            prevent = False
+        accepted = True
+        if prevent:
+            log.info("preventconfig enabled; not applying HA switch for %s", address)
+        else:
+            accepted, _changed = sync.apply_device_use(address, want)
         with self._lock:
-            self._publish_switch_control_locked(address, True)
-            self._publish_switch_state_locked(address, "ON" if want else "OFF")
+            if accepted:
+                self._publish_switch_control_locked(address, True)
+                self._publish_switch_state_locked(address, "ON" if want else "OFF")
+            else:
+                self._publish_switch_control_locked(address, _is_controllable(in_use_by))
+                self._publish_switch_state_locked(
+                    address, "ON" if in_use_by != "NO ONE" else "OFF"
+                )
 
     def _handle_client_command(self, key: str, payload: str) -> None:
         option_name = None
@@ -762,6 +797,11 @@ class HaEntityManager:
             return
         want = payload.strip().upper() in ("ON", "TRUE", "1")
         _set_client_option(option_name, want)
+        try:
+            if not config.read_options().get("preventconfig"):
+                sync.configure()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Failed to apply %s from HA switch: %s", option_name, exc)
         with self._lock:
             self._mqtt_call(
                 lambda: ha.mqtt_publish(

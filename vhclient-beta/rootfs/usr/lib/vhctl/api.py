@@ -99,6 +99,20 @@ def local_ipv4_addresses() -> Set[str]:
     return _LOCAL_IPS
 
 
+def effective_in_use_by(value: str) -> str:
+    """Normalize in-use text and map this addon back to "you".
+
+    DEVICE INFO often returns a hostname or ``user (hostname)`` instead of
+    "you" after the app slug (container hostname) changes.
+    """
+    who = normalize_in_use_by(value)
+    if who in ("NO ONE", "you"):
+        return who
+    if client_is_local(who, who):
+        return "you"
+    return who
+
+
 def client_is_local(bound_host: str, client_id: str = "", bound_ip: str = "") -> bool:
     """True when VirtualHere is describing this client, not another one.
 
@@ -150,11 +164,11 @@ class DeviceInfo:
 
     @property
     def in_use_by_you(self) -> bool:
-        return normalize_in_use_by(self.in_use_by) == "you"
+        return effective_in_use_by(self.in_use_by) == "you"
 
     @property
     def in_use_by_no_one(self) -> bool:
-        return normalize_in_use_by(self.in_use_by) == "NO ONE"
+        return effective_in_use_by(self.in_use_by) == "NO ONE"
 
     @property
     def display_name(self) -> str:

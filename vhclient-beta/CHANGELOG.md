@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.2
+
+- Apply USB use / stop and Auto-Find / Auto-Use All immediately when an entity switch is changed
+- Do not ignore a switch click when VirtualHere reports this client by hostname instead of "you"
+
 ## 0.7.1
 
 - Refresh addon USB device labels and Home Assistant entities as soon as a device is used or released

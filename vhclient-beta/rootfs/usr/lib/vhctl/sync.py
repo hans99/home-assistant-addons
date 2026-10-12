@@ -183,6 +183,67 @@ def _ensure_auto_use(address: str, want_auto: bool, currently_auto: bool) -> Non
     log.info("AUTO USE DEVICE,%s -> %s", address, result.text)
 
 
+def apply_device_use(address: str, want_use: bool) -> tuple[bool, bool]:
+    """USE or STOP USING one device.
+
+    Returns ``(accepted, hardware_changed)``. ``accepted`` is false when another
+    client holds the device or the Client API call failed.
+    """
+    try:
+        info = api.device_info(address)
+    except PipeError as exc:
+        log.warning("DEVICE INFO,%s failed: %s", address, exc)
+        return False, False
+
+    if info is None:
+        log.info("DEVICE INFO,%s empty; device not present", address)
+        return False, False
+
+    who = api.effective_in_use_by(info.in_use_by)
+    log.info("DEVICE INFO,%s IN USE BY: %s", address, who)
+    if who not in ("you", "NO ONE"):
+        log.info("Skipping %s; in use by someone else (%s)", address, who)
+        return False, False
+
+    try:
+        currently_auto = address in _auto_use_addresses(api.list_status())
+    except PipeError:
+        currently_auto = False
+
+    hardware_changed = False
+    if want_use:
+        if who == "you":
+            _ensure_auto_use(address, want_auto=True, currently_auto=currently_auto)
+            return True, False
+        result = api.use_device(address)
+        log.info("USE,%s -> %s", address, result.text)
+        if result.failed:
+            return False, False
+        hardware_changed = True
+        try:
+            info_after = api.device_info(address)
+        except PipeError as exc:
+            log.warning("DEVICE INFO,%s after USE failed: %s", address, exc)
+            return True, True
+        if info_after is None:
+            return True, True
+        try:
+            currently_auto = address in _auto_use_addresses(api.list_status())
+        except PipeError:
+            currently_auto = False
+        _ensure_auto_use(address, want_auto=True, currently_auto=currently_auto)
+        return True, hardware_changed
+
+    if who == "you":
+        result = api.stop_using(address)
+        log.info("STOP USING,%s -> %s", address, result.text)
+        if result.failed:
+            return False, False
+        hardware_changed = True
+    _ensure_auto_use(address, want_auto=False, currently_auto=currently_auto)
+    return True, hardware_changed
+
+
 def sync_devices() -> int:
     options = config.read_options()
     if options.get("preventconfig"):
@@ -198,12 +259,11 @@ def sync_devices() -> int:
         return 0
 
     try:
-        status = api.list_status()
+        api.list_status()
     except PipeError as exc:
         log.error("Cannot sync devices: %s", exc)
         return 1
 
-    auto_addresses = _auto_use_addresses(status)
     hardware_changed = False
 
     for item in usbdevices:
@@ -217,56 +277,9 @@ def sync_devices() -> int:
         if not address:
             continue
 
-        # Required gate: DEVICE INFO before any AUTO USE / USE decision.
-        try:
-            info = api.device_info(address)
-        except PipeError as exc:
-            log.warning("DEVICE INFO,%s failed: %s", address, exc)
-            continue
-
-        if info is None:
-            log.info("DEVICE INFO,%s empty; device not present, skipping", address)
-            continue
-
-        log.info(
-            "DEVICE INFO,%s IN USE BY: %s",
-            address,
-            info.in_use_by or "NO ONE",
-        )
-        currently_auto = address in auto_addresses
-
-        if want_use:
-            if info.in_use_by_you:
-                _ensure_auto_use(address, want_auto=True, currently_auto=currently_auto)
-            elif info.in_use_by_no_one:
-                result = api.use_device(address)
-                log.info("USE,%s -> %s", address, result.text)
-                hardware_changed = True
-                # Re-check DEVICE INFO before toggling AUTO USE.
-                try:
-                    info_after = api.device_info(address)
-                except PipeError as exc:
-                    log.warning("DEVICE INFO,%s after USE failed: %s", address, exc)
-                    continue
-                if info_after is None:
-                    continue
-                try:
-                    currently_auto = address in _auto_use_addresses(api.list_status())
-                except PipeError:
-                    currently_auto = False
-                _ensure_auto_use(address, want_auto=True, currently_auto=currently_auto)
-            else:
-                log.info(
-                    "Skipping %s; in use by someone else (%s)",
-                    address,
-                    info.in_use_by,
-                )
-        else:
-            if info.in_use_by_you:
-                result = api.stop_using(address)
-                log.info("STOP USING,%s -> %s", address, result.text)
-                hardware_changed = True
-            _ensure_auto_use(address, want_auto=False, currently_auto=currently_auto)
+        _accepted, changed = apply_device_use(address, want_use)
+        if changed:
+            hardware_changed = True
 
     if hardware_changed:
         discovery.trigger_hardware_discovery()
