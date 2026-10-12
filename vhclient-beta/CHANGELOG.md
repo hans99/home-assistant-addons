@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.3
+
+- Subscribe to each device and control switch command topic, not only one wildcard
+
 ## 0.7.2
 
 - Apply USB use / stop and Auto-Find / Auto-Use All immediately when an entity switch is changed

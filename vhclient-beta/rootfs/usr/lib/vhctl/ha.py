@@ -10,7 +10,7 @@ import socket
 import struct
 import urllib.error
 import urllib.request
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Set
 from urllib.parse import urlparse
 
 from . import config
@@ -259,8 +259,31 @@ class _WsConn:
             pass
 
 
+def _message_id(message: dict[str, Any]) -> Optional[int]:
+    raw = message.get("id")
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _dispatch_mqtt_event(
+    message: dict[str, Any],
+    subscribed: dict[int, str],
+    on_message: Callable[[str, str], None],
+) -> None:
+    msg_id = _message_id(message)
+    if message.get("type") != "event" or msg_id not in subscribed:
+        return
+    event = message.get("event") or {}
+    evt_topic = event.get("topic")
+    payload = event.get("payload")
+    if isinstance(evt_topic, str) and payload is not None:
+        on_message(evt_topic, str(payload))
+
+
 def run_mqtt_subscriber(
-    topic: str,
+    topics: Callable[[], Set[str]],
     on_message: Callable[[str, str], None],
     should_stop: Callable[[], bool],
     reconnect_seconds: float = 5.0,
@@ -268,7 +291,12 @@ def run_mqtt_subscriber(
     on_failure: Optional[Callable[[Exception, int], None]] = None,
     on_give_up: Optional[Callable[[Exception], None]] = None,
 ) -> None:
-    """Block, keeping an mqtt/subscribe WebSocket alive until should_stop().
+    """Block, subscribing to command topics until should_stop().
+
+    ``topics`` is read again while connected so new USB device switches are
+    subscribed without waiting for a reconnect. Exact topics are required:
+    Home Assistant delivers those on the simple MQTT subscription path, while
+    a single wildcard can miss switch commands.
 
     If max_failures > 0, stop after that many consecutive connect/subscribe
     failures (successful subscribe resets the counter).
@@ -279,30 +307,55 @@ def run_mqtt_subscriber(
     while not should_stop():
         try:
             with HaWebsocket(timeout=60.0) as ws:
-                sub_id = ws.send({"type": "mqtt/subscribe", "topic": topic})
-                result = None
-                while result is None:
-                    msg = ws.recv(timeout=30.0)
-                    if msg.get("type") == "result" and msg.get("id") == sub_id:
-                        result = msg
-                        break
-                if not result.get("success"):
-                    raise RuntimeError(f"mqtt/subscribe failed: {result}")
+                subscribed: dict[int, str] = {}
+                pending: dict[int, str] = {}
+
+                def ensure_topics() -> None:
+                    wanted = {topic for topic in topics() if topic}
+                    have = set(subscribed.values()) | set(pending.values())
+                    for topic in sorted(wanted - have):
+                        sub_id = ws.send(
+                            {"type": "mqtt/subscribe", "topic": topic, "qos": 0}
+                        )
+                        pending[sub_id] = topic
+
+                def take_result(message: dict[str, Any]) -> bool:
+                    msg_id = _message_id(message)
+                    if message.get("type") != "result" or msg_id not in pending:
+                        return False
+                    topic = pending.pop(msg_id)
+                    if not message.get("success"):
+                        raise RuntimeError(f"mqtt/subscribe failed for {topic}: {message}")
+                    subscribed[msg_id] = topic
+                    log.info("Subscribed to MQTT topic %s via Home Assistant", topic)
+                    return True
+
+                ensure_topics()
+                while pending and not should_stop():
+                    try:
+                        incoming = ws.recv(timeout=30.0)
+                    except socket.timeout:
+                        ensure_topics()
+                        continue
+                    if take_result(incoming):
+                        continue
+                    _dispatch_mqtt_event(incoming, subscribed, on_message)
                 failures = 0
-                log.info("Subscribed to MQTT topic %s via Home Assistant", topic)
+                if subscribed:
+                    log.info(
+                        "Listening for switch commands on %s",
+                        ", ".join(sorted(subscribed.values())),
+                    )
 
                 while not should_stop():
+                    ensure_topics()
                     try:
-                        msg = ws.recv(timeout=30.0)
+                        incoming = ws.recv(timeout=2.0)
                     except socket.timeout:
                         continue
-                    if msg.get("type") != "event" or msg.get("id") != sub_id:
+                    if take_result(incoming):
                         continue
-                    event = msg.get("event") or {}
-                    evt_topic = event.get("topic")
-                    payload = event.get("payload")
-                    if isinstance(evt_topic, str) and payload is not None:
-                        on_message(evt_topic, str(payload))
+                    _dispatch_mqtt_event(incoming, subscribed, on_message)
         except Exception as exc:  # noqa: BLE001
             if should_stop():
                 break
@@ -321,9 +374,8 @@ def run_mqtt_subscriber(
                     on_give_up(exc)
                 else:
                     log.error(
-                        "MQTT subscribe failed %s times; giving up on topic %s",
+                        "MQTT subscribe failed %s times; giving up",
                         failures,
-                        topic,
                     )
                 break
             time.sleep(reconnect_seconds)

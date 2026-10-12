@@ -16,6 +16,7 @@ import logging
 import os
 import re
 import threading
+import time
 from typing import Any, Callable, Dict, Optional, Set, Tuple
 
 from . import api, config, ha, sync
@@ -364,7 +365,7 @@ class HaEntityManager:
         self._addresses: Set[str] = {
             key.split(":", 1)[1]
             for key in self._published
-            if key.startswith("switch:")
+            if key.startswith("switch:") and not key.startswith("switch:client_")
         }
 
     def start(self) -> None:
@@ -809,10 +810,39 @@ class HaEntityManager:
                 )
             )
 
+    def command_topics(self) -> Set[str]:
+        """Exact command topics, plus one wildcard per switch group.
+
+        Exact topics are what Home Assistant reliably delivers. The wildcards
+        cover a device switch that is toggled before its exact subscribe exists.
+        """
+        with self._lock:
+            addresses = {
+                addr
+                for addr in self._addresses
+                if addr and not str(addr).startswith("client_")
+            }
+        topics = {client_command_topic(key) for key, _, _, _ in CLIENT_SWITCHES}
+        topics.update(switch_command_topic(addr) for addr in addresses)
+        topics.add("vhclient/usb/+/set")
+        topics.add("vhclient/client/+/set")
+        return topics
+
     def _listen_commands(self) -> None:
+        recent: Dict[tuple[str, str], float] = {}
+
         def on_message(topic: str, payload: str) -> None:
             if not self._enabled or self._gave_up:
                 return
+            now = time.monotonic()
+            key = (topic, payload)
+            previous = recent.get(key)
+            if previous is not None and now - previous < 1.0:
+                return
+            recent[key] = now
+            for stale in [item for item, seen in recent.items() if now - seen > 5.0]:
+                recent.pop(stale, None)
+            log.info("MQTT command %s = %s", topic, payload)
             usb_match = USB_COMMAND_TOPIC_RE.match(topic)
             if usb_match:
                 self._handle_usb_command(usb_match.group(1), payload)
@@ -820,6 +850,8 @@ class HaEntityManager:
             client_match = CLIENT_COMMAND_TOPIC_RE.match(topic)
             if client_match:
                 self._handle_client_command(client_match.group(1), payload)
+            else:
+                log.info("Ignoring MQTT message on %s", topic)
 
         def on_failure(exc: Exception, failures: int) -> None:
             log.warning(
@@ -841,7 +873,7 @@ class HaEntityManager:
                     self._give_up_locked()
 
         ha.run_mqtt_subscriber(
-            "vhclient/+/+/set",
+            self.command_topics,
             on_message,
             should_stop=lambda: self._stop.is_set() or self._gave_up,
             max_failures=MQTT_MAX_FAILURES,
