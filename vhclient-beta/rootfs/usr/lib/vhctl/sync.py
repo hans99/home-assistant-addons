@@ -118,31 +118,53 @@ def configure() -> int:
 
 
 def discover() -> int:
-    """Refresh usbdevices labels from GET CLIENT STATE (nickname > product)."""
+    """Refresh usbdevices labels (nickname, plus live in-use status).
+
+    LIST is the source of device addresses and "in use by you". GET CLIENT STATE
+    supplies nicknames and can still recognize this client when the addon slug
+    (container hostname) no longer matches the hostname VirtualHere stored.
+    """
     labels: list[str] = []
+    state_by_addr: dict[str, api.ClientStateDevice] = {}
 
     try:
-        state_devices = api.iter_client_state_devices()
-    except Exception as exc:  # noqa: BLE001 - fall back to LIST
-        log.warning("GET CLIENT STATE discover failed (%s); falling back to LIST", exc)
-        state_devices = []
+        for device in api.iter_client_state_devices():
+            state_by_addr[device.address] = device
+    except Exception as exc:  # noqa: BLE001 - LIST still has addresses and in-use
+        log.warning("GET CLIENT STATE discover failed (%s); using LIST", exc)
 
-    if state_devices:
-        for device in state_devices:
-            label = device.label
-            labels.append(label)
-            log.info("Found device: %s", label)
-    else:
-        try:
-            status = api.list_status()
-        except PipeError as exc:
+    try:
+        status = api.list_status()
+    except PipeError as exc:
+        if not state_by_addr:
             log.error("Cannot discover devices: %s", exc)
             return 1
+        log.warning("LIST discover failed (%s); using GET CLIENT STATE", exc)
+        status = None
+
+    if status is not None and status.devices:
+        seen: set[str] = set()
         for device in status.devices:
-            # LIST already prefers nickname when set; always keep in-use status.
-            label = device.label
+            seen.add(device.address)
+            state = state_by_addr.get(device.address)
+            name = device.name
+            if state is not None:
+                name = api.prefer_name(state.nickname, state.product, device.name or device.address)
+            who = device.in_use_by
+            if who != "you" and state is not None and state.in_use_by == "you":
+                who = "you"
+            label = api.format_device_label(name, device.address, who)
             labels.append(label)
             log.info("Found device: %s", label)
+        for address, state in state_by_addr.items():
+            if address in seen:
+                continue
+            labels.append(state.label)
+            log.info("Found device: %s", state.label)
+    else:
+        for state in state_by_addr.values():
+            labels.append(state.label)
+            log.info("Found device: %s", state.label)
 
     config.ensure_usbdevices(labels)
     return 0

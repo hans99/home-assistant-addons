@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.1
+
+- Refresh addon USB device labels and Home Assistant entities as soon as a device is used or released
+- Treat this client as "you" when the addon slug (container hostname) no longer matches the name VirtualHere stored
+- Name the AppArmor profile `vhclient-beta` so it matches the app slug
+
 ## 0.7.0
 
 - Remove unused s6 oneshots superseded by `vhctl watch`

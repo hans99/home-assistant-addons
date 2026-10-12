@@ -6,7 +6,7 @@ import hashlib
 import json
 import logging
 import time
-from typing import Any, Dict, Optional, Set
+from typing import Any, Dict, Optional
 
 from . import api, config, discovery, entities, sync
 from .pipe import PipeError
@@ -18,13 +18,13 @@ MIN_DISCOVER_SECONDS = 5.0
 MAX_DISCOVER_SECONDS = 3600.0
 
 
-def _local_in_use_addresses() -> Set[str]:
-    """Addresses currently in use by this client (for Auto-Use attach detection)."""
+def _in_use_map() -> Optional[Dict[str, str]]:
+    """address -> who is using it. None when LIST cannot be read."""
     try:
         status = api.list_status()
     except PipeError:
-        return set()
-    return {d.address for d in status.devices if d.in_use_by_you}
+        return None
+    return {d.address: api.normalize_in_use_by(d.in_use_by) for d in status.devices}
 
 
 def _intent_from_options(options: Dict[str, Any]) -> Dict[str, Any]:
@@ -119,7 +119,7 @@ def watch(
     last_intent: Dict[str, Any] = {}
     last_discover = 0.0
     last_logged_interval: Optional[float] = None
-    last_local_use = _local_in_use_addresses()
+    last_in_use: Dict[str, str] = _in_use_map() or {}
 
     # Initial apply once IPC is expected to be up (caller should depend on wait).
     options = _load_options()
@@ -143,8 +143,8 @@ def watch(
             last_intent_hash = _intent_hash(options)
             interval = _discover_interval(options, discover_seconds)
         _sync_ha_entities(options)
-        # Baseline after initial sync (sync_devices already triggers HA discovery).
-        last_local_use = _local_in_use_addresses()
+        # Baseline after initial sync so the first poll does not look like a change.
+        last_in_use = _in_use_map() or last_in_use
 
     while True:
         time.sleep(poll_seconds)
@@ -180,21 +180,36 @@ def watch(
                 last_intent = current_intent
                 last_intent_hash = intent_hash
             _sync_ha_entities(options)
-            last_local_use = _local_in_use_addresses()
+            last_in_use = _in_use_map() or last_in_use
             last_discover = now
             continue
 
-        # Auto-Use All attaches without sync_devices; detect new local binds.
-        current_local_use = _local_in_use_addresses()
-        newly_local = current_local_use - last_local_use
-        if newly_local:
+        # Use / stop-using (this client or another) does not change addon options.
+        # Refresh config labels and HA entities as soon as in-use status changes.
+        current_in_use = _in_use_map()
+        if current_in_use is not None and current_in_use != last_in_use:
+            you_before = {addr for addr, who in last_in_use.items() if who == "you"}
+            you_now = {addr for addr, who in current_in_use.items() if who == "you"}
             log.info(
-                "New locally used device(s): %s; triggering HA USB discovery",
-                ", ".join(sorted(newly_local)),
+                "USB in-use changed (%s); updating config and HA entities",
+                ", ".join(
+                    f"{addr}: {last_in_use.get(addr, 'absent')} -> {who}"
+                    for addr, who in sorted(current_in_use.items())
+                    if last_in_use.get(addr) != who
+                )
+                or "device list",
             )
-            discovery.trigger_hardware_discovery()
+            if you_before != you_now:
+                discovery.trigger_hardware_discovery()
+            sync.discover()
+            options = _load_options()
+            if options is not None:
+                last_intent = _intent_from_options(options)
+                last_intent_hash = _intent_hash(options)
             _sync_ha_entities(options)
-        last_local_use = current_local_use
+            last_in_use = current_in_use
+            last_discover = now
+            continue
 
         if now - last_discover >= interval:
             log.info("Periodic USB device list refresh")
@@ -205,4 +220,7 @@ def watch(
                 last_intent = _intent_from_options(options)
                 last_intent_hash = _intent_hash(options)
             _sync_ha_entities(options)
+            refreshed = _in_use_map()
+            if refreshed is not None:
+                last_in_use = refreshed
             last_discover = now

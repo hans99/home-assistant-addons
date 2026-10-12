@@ -7,7 +7,7 @@
 #   journalctl _TRANSPORT="audit" -g 'apparmor="DENIED"'
 # Temporarily add flag complain to gather ALLOWED events, then tighten.
 
-profile vhclient flags=(attach_disconnected,mediate_deleted) {
+profile vhclient-beta flags=(attach_disconnected,mediate_deleted) {
   #include <abstractions/base>
 
   # Capabilities required for vhci-hcd, USB/IP, and s6

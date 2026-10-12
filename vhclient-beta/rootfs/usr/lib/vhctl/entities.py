@@ -313,6 +313,12 @@ def _collect_device_info(
         if not nickname and not product:
             product = listed.name
 
+    # LIST / client-state "you" wins over a hostname left behind by a slug rename.
+    if (listed is not None and listed.in_use_by_you) or (
+        state_dev is not None and api.normalize_in_use_by(state_dev.in_use_by) == "you"
+    ):
+        in_use_by = "you"
+
     hub = address.rsplit(".", 1)[0] if "." in address else ""
     port = address.rsplit(".", 1)[1] if "." in address else ""
     display = api.prefer_name(nickname, product, vendor or address)
@@ -460,8 +466,9 @@ class HaEntityManager:
                 if not self._publish_switch_locked(address, name, sw_version):
                     return
                 # In use by anyone (you or another) shows ON; free shows OFF unless configured.
-                in_use_other = not controllable and not info.get("in_use_by_you")
-                state = "ON" if (meta["use"] or address in in_use_you or in_use_other) else "OFF"
+                in_use_by_you = bool(info.get("in_use_by_you")) or address in in_use_you
+                in_use_other = not controllable and not in_use_by_you
+                state = "ON" if (meta["use"] or in_use_by_you or in_use_other) else "OFF"
                 if not self._publish_switch_state_locked(address, state):
                     return
                 if not self._publish_switch_control_locked(address, controllable):

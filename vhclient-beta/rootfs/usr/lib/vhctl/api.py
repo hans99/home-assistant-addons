@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import base64
+import os
 import platform
 import re
+import socket
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 from .pipe import PipeError, PipeResult, send_command
 
@@ -27,6 +30,90 @@ def normalize_in_use_by(value: str) -> str:
     if upper in ("YOU", "ME"):
         return "you"
     return text
+
+
+def _name_variants(name: str) -> Set[str]:
+    short = (name or "").split(".")[0].strip().lower()
+    if not short:
+        return set()
+    return {short, short.replace("_", "-"), short.replace("-", "_")}
+
+
+_LOCAL_NAMES: Optional[Set[str]] = None
+_LOCAL_IPS: Optional[Set[str]] = None
+
+
+def local_identity_names() -> Set[str]:
+    """Names that mean this addon after a slug rename.
+
+    Supervisor sets the container hostname from the app slug (``_`` becomes ``-``).
+    VirtualHere may still report an older hostname from ``vhclient.ini``.
+    """
+    global _LOCAL_NAMES
+    if _LOCAL_NAMES is None:
+        names: Set[str] = set()
+        for raw in (platform.node(), socket.gethostname(), os.environ.get("HOSTNAME", "")):
+            names |= _name_variants(raw)
+        _LOCAL_NAMES = names
+    return _LOCAL_NAMES
+
+
+def decode_bound_ip(value: str) -> str:
+    """Decode GET CLIENT STATE boundConnectionIp (dotted IPv4 or base64 uint32)."""
+    text = (value or "").strip()
+    if not text:
+        return ""
+    if re.fullmatch(r"(?:\d{1,3}\.){3}\d{1,3}", text):
+        return "" if text == "0.0.0.0" else text
+    # VirtualHere sends a base64 uint32 such as "wKgB7w==", not free text.
+    if "=" not in text:
+        return ""
+    try:
+        data = base64.b64decode(text, validate=True)
+    except Exception:  # noqa: BLE001
+        return ""
+    if len(data) < 4 or data[:4] == b"\x00\x00\x00\x00":
+        return ""
+    return ".".join(str(byte) for byte in data[:4])
+
+
+def local_ipv4_addresses() -> Set[str]:
+    """IPv4 addresses of this host (host network: the HA host address)."""
+    global _LOCAL_IPS
+    if _LOCAL_IPS is None:
+        ips: Set[str] = set()
+        try:
+            for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+                ips.add(info[4][0])
+        except OSError:
+            pass
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                sock.connect(("192.0.2.1", 1))
+                ips.add(sock.getsockname()[0])
+        except OSError:
+            pass
+        ips.discard("0.0.0.0")
+        ips.discard("127.0.0.1")
+        _LOCAL_IPS = ips
+    return _LOCAL_IPS
+
+
+def client_is_local(bound_host: str, client_id: str = "", bound_ip: str = "") -> bool:
+    """True when VirtualHere is describing this client, not another one.
+
+    A slug change renames the container hostname. Match the current hostname,
+    underscore/hyphen variants, a client id that contains that hostname, and
+    the bound connection IP.
+    """
+    names = local_identity_names()
+    if names & _name_variants(bound_host):
+        return True
+    client = (client_id or "").strip().lower()
+    if client and (client in names or any(f"({name})" in client for name in names)):
+        return True
+    ip = decode_bound_ip(bound_ip)
+    return bool(ip) and ip in local_ipv4_addresses()
 
 
 def format_device_label(display_name: str, address: str, in_use_by: str = "") -> str:
@@ -105,6 +192,7 @@ class ClientStateDevice:
     state: str = ""
     auto_use: str = ""
     bound_client_hostname: str = ""
+    bound_connection_ip: str = ""
 
     @property
     def display_name(self) -> str:
@@ -118,18 +206,17 @@ class ClientStateDevice:
         except ValueError:
             state_val = 0
         bound = bool(state_val & 2)
-        if not bound and not (self.client_id or "").strip():
-            return "NO ONE"
-
-        local_host = platform.node().split(".")[0].lower()
-        bound_host = (self.bound_client_hostname or "").split(".")[0].lower()
-        if bound_host and local_host and bound_host == local_host:
-            return "you"
-
         client = (self.client_id or "").strip()
-        if not client:
-            return "you" if bound else "NO ONE"
-        return client
+        host = (self.bound_client_hostname or "").strip()
+        if client_is_local(host, client, self.bound_connection_ip):
+            return "you"
+        if not bound and not client and not host:
+            return "NO ONE"
+        if client:
+            return client
+        if host:
+            return host
+        return "you" if bound else "NO ONE"
 
     @property
     def label(self) -> str:
@@ -193,9 +280,13 @@ def parse_device_line(line: str) -> Optional[ListedDevice]:
             in_use_by = "you"
         else:
             # "(In-use by: name at ip)" or similar
-            detail = re.sub(r"^\(In-use by:?\s*", "", in_use_status, flags=re.I)
-            detail = detail.rstrip(")").strip()
+            detail = re.sub(r"^\(In-use by:?\s*", "", in_use_status, flags=re.I).strip()
+            # Drop only the wrapping ")", so a client id like "root (vhclient-beta)" stays intact.
+            if detail.endswith(")"):
+                detail = detail[:-1].strip()
             in_use_by = detail or "you"
+        if in_use_by not in ("you", "NO ONE") and client_is_local(in_use_by, in_use_by):
+            in_use_by = "you"
 
     label = format_device_label(name, address, in_use_by)
 
@@ -288,6 +379,9 @@ def iter_client_state_devices(root: Optional[ET.Element] = None) -> List[ClientS
                     auto_use=(device.get("autoUse") or "").strip(),
                     bound_client_hostname=(
                         device.get("boundClientHostname") or device.get("boundHostname") or ""
+                    ).strip(),
+                    bound_connection_ip=(
+                        device.get("boundConnectionIp") or device.get("boundClientIp") or ""
                     ).strip(),
                 )
             )
