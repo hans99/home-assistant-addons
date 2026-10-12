@@ -8,8 +8,7 @@ FROM ${BUILD_FROM}
 
 # Python controller for VirtualHere Client API (named pipes)
 RUN apk add --no-cache \
-    python3 \
-    py3-paho-mqtt
+    python3
 
 # Copy root filesystem (includes getvhclient helper)
 COPY rootfs /

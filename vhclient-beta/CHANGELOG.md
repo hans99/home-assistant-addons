@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.6
+
+- Require only that the Home Assistant MQTT integration is enabled (no Mosquitto / Supervisor MQTT provider)
+- Publish discovery with Core `mqtt.publish` and receive switch commands with `mqtt/subscribe`
+
 ## 0.7.5
 
 - Connect to the MQTT broker from the Supervisor service (`host`, `username`, `password`) and subscribe there for switch commands

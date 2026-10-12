@@ -6,7 +6,7 @@ Creates one device-registry device ("VirtualHere Client") with:
 - a sensor per USB device (status + all available attributes)
 - client diagnostic sensor (device count)
 
-Requires the Home Assistant MQTT integration. Discovery and switch commands use the broker from the Supervisor MQTT service.
+Requires the Home Assistant MQTT integration. Discovery uses mqtt.publish; switch commands use mqtt/subscribe.
 """
 
 from __future__ import annotations
@@ -945,7 +945,7 @@ class HaEntityManager:
             with self._lock:
                 if not self._gave_up:
                     log.error(
-                        "MQTT broker connection failed %s times (%s); disabling ha_entities",
+                        "MQTT subscribe failed %s times (%s); disabling ha_entities",
                         MQTT_MAX_FAILURES,
                         exc,
                     )
@@ -960,7 +960,7 @@ class HaEntityManager:
             except Exception as exc:  # noqa: BLE001
                 log.warning("Could not refresh MQTT discovery: %s", exc)
                 return
-            log.info("Publishing MQTT discovery after broker connect")
+            log.info("Publishing MQTT discovery after MQTT connect")
             self.sync(options)
 
         ha.run_mqtt_subscriber(

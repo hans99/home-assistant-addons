@@ -1,5 +1,5 @@
 name: VirtualHere Client (Beta)
-version: "0.7.5"
+version: "0.7.6"
 slug: vhclient-beta
 description: Beta VirtualHere USB Client for Home Assistant (API control, MQTT entities)
 arch:
@@ -11,7 +11,7 @@ host_network: true
 hassio_api: true
 hassio_role: default
 homeassistant_api: true
-# Optional: HA entities use the Supervisor MQTT service (broker host, user, password).
+# Optional: HA entities use the Home Assistant MQTT integration when enabled.
 services:
   - mqtt:want
 privileged:
