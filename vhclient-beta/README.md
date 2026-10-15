@@ -1,5 +1,7 @@
 # Home Assistant App: VirtualHere Client (Beta)
 
+<img src="untouched-by-human-hands.svg" alt="Untouched by Human Hands" height="20" />
+
 **Beta** — APIs, options, and entity IDs may change without a stable migration path.
 
 Installs the [VirtualHere](https://www.virtualhere.com/) Linux console USB client. Options are applied through the [Client API](https://www.virtualhere.com/client_api) (named pipes) by `vhctl`; the app does not edit `vhclient.ini`.
